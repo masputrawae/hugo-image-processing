@@ -1,0 +1,105 @@
+{{- $src := .src -}}
+{{- $alt := .alt | default "Image" -}}
+{{- $title := .title -}}
+{{- $loading := .loading | default "lazy" -}}
+{{- $class := .class -}}
+{{- $mode := .mode | default "" -}}
+{{- $base := .base | default 300 -}}
+{{- $sizesParam := .sizes -}}
+
+{{/* Default widths */}}
+{{- $defaultWidths := slice 320 768 1024 1280 1536 -}}
+
+{{/* Override berdasarkan mode */}}
+{{- if $mode }}
+  {{- if eq $mode "square" }}
+    {{- $sizesParam = slice $base (mul $base 2) (mul $base 3) -}}
+  {{- else if eq $mode "portrait" }}
+    {{- $sizesParam = slice $base (mul $base 2) -}}
+  {{- else if eq $mode "landscape" }}
+    {{- $sizesParam = slice (mul $base 2) (mul $base 3) -}}
+  {{- else if eq $mode "smart" }}
+    {{- $sizesParam = slice $base (mul $base 2) -}}
+  {{- end }}
+{{- end }}
+
+{{- $widths := cond (ne $sizesParam nil) $sizesParam $defaultWidths -}}
+
+{{/* Load image */}}
+{{- $image := "" -}}
+{{- if strings.HasPrefix $src "http" }}
+  {{- $image = resources.GetRemote $src }}
+  {{- if not $image }}
+    {{- warnf "Failed to load remote image: %s" $src }}
+  {{- end }}
+{{- else }}
+  {{- $image = resources.Get $src }}
+{{- end }}
+
+{{- with $image }}
+  {{- $jpgSet := slice -}}
+  {{- $webpSet := slice -}}
+  {{- $largest := dict "src" .RelPermalink "w" .Width "h" .Height -}}
+
+  {{- $sizesStr := "100vw" -}}
+  {{- if $sizesParam }}
+    {{- $sizesStr = delimit (apply $sizesParam "printf" "%dpx" ".") ", " }}
+  {{- end }}
+
+  {{- range $i, $w := $widths }}
+    {{/* Processing */}}
+    {{- $processed := "" -}}
+    {{- if eq $mode "square" }}
+      {{- $processed = $image.Fill (printf "%dx%d" $w $w) -}}
+    {{- else if eq $mode "portrait" }}
+      {{- $processed = $image.Fill (printf "%dx%d" $w (mul $w 4)) -}}
+    {{- else if eq $mode "landscape" }}
+      {{- $processed = $image.Fill (printf "%dx%d" (mul $w 4) $w) -}}
+    {{- else if eq $mode "smart" }}
+      {{- $processed = $image.Fill (printf "%dx%d Smart" $w $w) -}}
+    {{- else }}
+      {{- $processed = $image.Resize (printf "%dx0" $w) -}}
+    {{- end }}
+
+    {{- if not $processed }}
+      {{- warnf "Failed to process image %s at width %d" $src $w }}
+      {{- continue }}
+    {{- end }}
+
+    {{/* Tambahkan ke srcset */}}
+    {{- $jpgSet = $jpgSet | append (printf "%s %dw" $processed.RelPermalink $processed.Width) -}}
+    {{- $webpSet = $webpSet | append (printf "%s %dw" ($processed.Process "webp").RelPermalink $processed.Width) -}}
+
+    {{/* Update largest */}}
+    {{- if gt $processed.Width $largest.w }}
+      {{- $largest = dict "src" $processed.RelPermalink "w" $processed.Width "h" $processed.Height -}}
+    {{- end }}
+  {{- end }}
+
+
+  <picture>
+    <source
+      type="image/webp"
+      srcset="{{ delimit $webpSet ", " }}"
+      sizes="{{ $sizesStr }}"
+    />
+    <source
+      type="image/jpeg"
+      srcset="{{ delimit $jpgSet ", " }}"
+      sizes="{{ $sizesStr }}"
+    />
+    <img
+      src="{{ $largest.src }}"
+      alt="{{ $alt }}"
+      width="{{ $largest.w }}"
+      height="{{ $largest.h }}"
+      loading="{{ $loading }}"
+      decoding="async"
+      {{- with $class }}class="{{ . }}"{{ end }}
+      {{- with $title }}title="{{ . }}"{{ end }}
+    />
+  </picture>
+{{- else }}
+  {{- warnf "Image not found: %s" $src }}
+  <img src="{{ $src }}" alt="{{ $alt }}" />
+{{- end }}
